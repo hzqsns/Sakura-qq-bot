@@ -132,6 +132,52 @@ class ContextManager:
         finally:
             conn.close()
 
+    def build_llm_messages(
+        self,
+        group_id: str,
+        user_id: str,
+        current_content: str,
+        current_image_urls: list[str],
+        system_prompt: str,
+    ) -> list[dict]:
+        """Build the full message list for LLM call with dual-layer context."""
+        messages = []
+
+        # 1. System prompt
+        messages.append({"role": "system", "content": system_prompt})
+
+        # 2. Group context as background
+        group_ctx = self.get_group_context(group_id)
+        if group_ctx:
+            group_lines = []
+            for msg in group_ctx:
+                prefix = "[Bot]" if msg.is_bot_reply else f"[{msg.sender_name}]"
+                line = f"{prefix}: {msg.content}"
+                if msg.image_urls:
+                    line += " [图片]"
+                group_lines.append(line)
+            group_summary = "以下是最近的群聊记录：\n" + "\n".join(group_lines)
+            messages.append({"role": "system", "content": group_summary})
+
+        # 3. User conversation history
+        user_ctx = self.get_user_context(group_id, user_id)
+        for msg in user_ctx:
+            role = "assistant" if msg.is_bot_reply else "user"
+            messages.append({"role": role, "content": msg.content})
+
+        # 4. Current question
+        if current_image_urls:
+            content = []
+            if current_content:
+                content.append({"type": "text", "text": current_content})
+            for url in current_image_urls:
+                content.append({"type": "image_url", "image_url": {"url": url}})
+            messages.append({"role": "user", "content": content})
+        else:
+            messages.append({"role": "user", "content": current_content})
+
+        return messages
+
 
 class NoiseFilter:
     @staticmethod

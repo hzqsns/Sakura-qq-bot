@@ -173,3 +173,59 @@ class TestSQLitePersistence:
         mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
         mgr.load_from_db("/nonexistent/path.db")
         assert mgr.get_group_context("g1") == []
+
+
+class TestContextMerging:
+    def test_build_llm_context_with_both_layers(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        now = time.time()
+
+        mgr.add_group_message("g1", ContextMessage("u2", "Bob", "anyone know about python?", [], now - 60, False))
+        mgr.add_group_message("g1", ContextMessage("u3", "Charlie", "yeah it's great", [], now - 30, False))
+
+        mgr.add_user_message("g1", "u1", ContextMessage("u1", "Alice", "what is rust?", [], now - 120, False))
+        mgr.add_user_message("g1", "u1", ContextMessage("bot", "Bot", "Rust is a systems programming language.", [], now - 110, True))
+
+        messages = mgr.build_llm_messages(
+            group_id="g1",
+            user_id="u1",
+            current_content="explain generics",
+            current_image_urls=[],
+            system_prompt="You are a helpful assistant.",
+        )
+
+        assert messages[0]["role"] == "system"
+        assert "Bob" in messages[1]["content"]
+        assert "Charlie" in messages[1]["content"]
+        assert messages[2]["role"] == "user"
+        assert "rust" in messages[2]["content"]
+        assert messages[3]["role"] == "assistant"
+        assert messages[-1]["role"] == "user"
+        assert "generics" in messages[-1]["content"]
+
+    def test_build_llm_context_empty(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        messages = mgr.build_llm_messages(
+            group_id="g1",
+            user_id="u1",
+            current_content="hello",
+            current_image_urls=[],
+            system_prompt="You are helpful.",
+        )
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+
+    def test_build_llm_context_with_images(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        messages = mgr.build_llm_messages(
+            group_id="g1",
+            user_id="u1",
+            current_content="what is this?",
+            current_image_urls=["https://example.com/img.jpg"],
+            system_prompt="You are helpful.",
+        )
+        last_msg = messages[-1]
+        assert last_msg["role"] == "user"
+        assert isinstance(last_msg["content"], list)
+        assert any(item.get("type") == "image_url" for item in last_msg["content"])
