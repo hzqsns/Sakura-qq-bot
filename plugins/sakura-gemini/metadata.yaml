@@ -1,0 +1,6 @@
+name: sakura_gemini
+display_name: Sakura Gemini 助手
+desc: 群聊 AI 助手，支持文字+图片问答、双层上下文管理、噪音过滤
+version: v0.1.0
+author: heziqi
+repo: https://github.com/hzqsns/Sakura-qq-bot

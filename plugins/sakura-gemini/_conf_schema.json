@@ -1,0 +1,42 @@
+{
+  "trigger_word": {
+    "type": "string",
+    "description": "触发词，群聊中以此开头的消息会触发 AI 问答",
+    "default": "gemini"
+  },
+  "group_ctx_max": {
+    "type": "int",
+    "description": "群级上下文最大条数",
+    "default": 50
+  },
+  "user_ctx_max": {
+    "type": "int",
+    "description": "用户上下文最大条数",
+    "default": 50
+  },
+  "ctx_expire_seconds": {
+    "type": "int",
+    "description": "上下文过期时间（秒）",
+    "default": 1800
+  },
+  "min_msg_length": {
+    "type": "int",
+    "description": "噪音过滤：纯文字消息最短长度，低于此长度的消息不记录到上下文",
+    "default": 3
+  },
+  "max_reply_length": {
+    "type": "int",
+    "description": "AI 回复最大字符数，超出截断",
+    "default": 500
+  },
+  "cooldown_seconds": {
+    "type": "int",
+    "description": "同群冷却时间（秒），冷却期间的请求静默忽略",
+    "default": 10
+  },
+  "system_prompt": {
+    "type": "string",
+    "description": "AI 系统提示词",
+    "default": "你是一个群聊 AI 助手。你可以看到群聊的历史消息作为背景信息，以及与当前提问者的对话历史。请根据上下文给出有帮助的回答。"
+  }
+}
