@@ -101,3 +101,26 @@ class TestContextManagerBasic:
         mgr.clear_user_context("group1", "u1")
         ctx = mgr.get_user_context("group1", "u1")
         assert len(ctx) == 0
+
+
+from context_manager import NoiseFilter
+
+
+class TestNoiseFilter:
+    def test_short_text_filtered(self):
+        assert NoiseFilter.should_filter(text="哈", has_image=False, is_command=False, min_length=3) is True
+
+    def test_normal_text_passes(self):
+        assert NoiseFilter.should_filter(text="今天天气不错", has_image=False, is_command=False, min_length=3) is False
+
+    def test_image_message_passes_even_short(self):
+        assert NoiseFilter.should_filter(text="", has_image=True, is_command=False, min_length=3) is False
+
+    def test_command_filtered(self):
+        assert NoiseFilter.should_filter(text="/help", has_image=False, is_command=True, min_length=3) is True
+
+    def test_empty_text_no_image_filtered(self):
+        assert NoiseFilter.should_filter(text="", has_image=False, is_command=False, min_length=3) is True
+
+    def test_whitespace_only_filtered(self):
+        assert NoiseFilter.should_filter(text="   ", has_image=False, is_command=False, min_length=3) is True

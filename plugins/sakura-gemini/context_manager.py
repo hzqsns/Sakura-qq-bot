@@ -63,3 +63,22 @@ class ContextManager:
     def clear_user_context(self, group_id: str, user_id: str) -> None:
         if group_id in self._user_ctx and user_id in self._user_ctx[group_id]:
             self._user_ctx[group_id][user_id].clear()
+
+
+class NoiseFilter:
+    @staticmethod
+    def should_filter(
+        text: str,
+        has_image: bool,
+        is_command: bool,
+        min_length: int = 3,
+    ) -> bool:
+        """Return True if the message should be filtered (not recorded)."""
+        if is_command:
+            return True
+        if has_image:
+            return False
+        stripped = text.strip()
+        if len(stripped) < min_length:
+            return True
+        return False
