@@ -124,3 +124,52 @@ class TestNoiseFilter:
 
     def test_whitespace_only_filtered(self):
         assert NoiseFilter.should_filter(text="   ", has_image=False, is_command=False, min_length=3) is True
+
+
+import os
+import tempfile
+
+
+class TestSQLitePersistence:
+    def setup_method(self, method):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmp_dir, "context_cache.db")
+
+    def test_save_and_load(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        msg1 = ContextMessage("u1", "Alice", "hello", [], time.time(), False)
+        msg2 = ContextMessage("u1", "Alice", "question", ["https://img.jpg"], time.time(), False)
+        mgr.add_group_message("g1", msg1)
+        mgr.add_group_message("g1", msg2)
+        mgr.add_user_message("g1", "u1", msg2)
+
+        mgr.save_to_db(self.db_path)
+
+        mgr2 = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        mgr2.load_from_db(self.db_path)
+
+        group_ctx = mgr2.get_group_context("g1")
+        assert len(group_ctx) == 2
+        assert group_ctx[1].image_urls == ["https://img.jpg"]
+
+        user_ctx = mgr2.get_user_context("g1", "u1")
+        assert len(user_ctx) == 1
+
+    def test_load_skips_expired(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=60)
+        old = ContextMessage("u1", "Alice", "old", [], time.time() - 120, False)
+        new = ContextMessage("u1", "Alice", "new", [], time.time(), False)
+        mgr.add_group_message("g1", old)
+        mgr.add_group_message("g1", new)
+        mgr.save_to_db(self.db_path)
+
+        mgr2 = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=60)
+        mgr2.load_from_db(self.db_path)
+        ctx = mgr2.get_group_context("g1")
+        assert len(ctx) == 1
+        assert ctx[0].content == "new"
+
+    def test_load_nonexistent_db(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        mgr.load_from_db("/nonexistent/path.db")
+        assert mgr.get_group_context("g1") == []

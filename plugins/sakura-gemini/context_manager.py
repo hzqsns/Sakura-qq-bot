@@ -64,6 +64,74 @@ class ContextManager:
         if group_id in self._user_ctx and user_id in self._user_ctx[group_id]:
             self._user_ctx[group_id][user_id].clear()
 
+    def save_to_db(self, db_path: str) -> None:
+        """Persist all context to SQLite."""
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS context_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ctx_type TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    user_id TEXT DEFAULT '',
+                    sender_id TEXT NOT NULL,
+                    sender_name TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    image_urls TEXT NOT NULL DEFAULT '[]',
+                    timestamp REAL NOT NULL,
+                    is_bot_reply INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("DELETE FROM context_messages")
+
+            for group_id, ctx_deque in self._group_ctx.items():
+                for msg in ctx_deque:
+                    conn.execute(
+                        "INSERT INTO context_messages (ctx_type, group_id, sender_id, sender_name, content, image_urls, timestamp, is_bot_reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        ("group", group_id, msg.sender_id, msg.sender_name, msg.content, json.dumps(msg.image_urls), msg.timestamp, int(msg.is_bot_reply)),
+                    )
+
+            for group_id, users in self._user_ctx.items():
+                for user_id, ctx_deque in users.items():
+                    for msg in ctx_deque:
+                        conn.execute(
+                            "INSERT INTO context_messages (ctx_type, group_id, user_id, sender_id, sender_name, content, image_urls, timestamp, is_bot_reply) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            ("user", group_id, user_id, msg.sender_id, msg.sender_name, msg.content, json.dumps(msg.image_urls), msg.timestamp, int(msg.is_bot_reply)),
+                        )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load_from_db(self, db_path: str) -> None:
+        """Load context from SQLite, skipping expired messages."""
+        if not os.path.exists(db_path):
+            return
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(
+                "SELECT ctx_type, group_id, user_id, sender_id, sender_name, content, image_urls, timestamp, is_bot_reply FROM context_messages ORDER BY timestamp ASC"
+            )
+            for row in cursor:
+                ctx_type, group_id, user_id, sender_id, sender_name, content, image_urls_json, timestamp, is_bot_reply = row
+                msg = ContextMessage(
+                    sender_id=sender_id,
+                    sender_name=sender_name,
+                    content=content,
+                    image_urls=json.loads(image_urls_json),
+                    timestamp=timestamp,
+                    is_bot_reply=bool(is_bot_reply),
+                )
+                if msg.is_expired(self.ctx_expire_seconds):
+                    continue
+                if ctx_type == "group":
+                    self.add_group_message(group_id, msg)
+                elif ctx_type == "user":
+                    self.add_user_message(group_id, user_id, msg)
+        finally:
+            conn.close()
+
 
 class NoiseFilter:
     @staticmethod
