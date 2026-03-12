@@ -8,7 +8,7 @@ from astrbot.api.message_components import Plain, Image, Face
 from astrbot.api.platform import MessageType
 import astrbot.api.message_components as Comp
 
-from context_manager import ContextManager, ContextMessage, NoiseFilter
+from context import ContextManager, ContextMessage, NoiseFilter
 
 
 @register("sakura_gemini", "heziqi", "群聊 AI 助手，支持文字+图片问答、双层上下文", "0.1.0")

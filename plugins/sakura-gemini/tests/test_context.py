@@ -1,7 +1,7 @@
-# plugins/sakura-gemini/tests/test_context_manager.py
+# plugins/sakura-gemini/tests/test_context.py
 import time
 import pytest
-from context_manager import ContextMessage, ContextManager
+from context import ContextMessage, ContextManager
 
 
 class TestContextMessage:
@@ -103,7 +103,7 @@ class TestContextManagerBasic:
         assert len(ctx) == 0
 
 
-from context_manager import NoiseFilter
+from context import NoiseFilter
 
 
 class TestNoiseFilter:
