@@ -125,7 +125,7 @@ class SakuraGeminiPlugin(Star):
             finally:
                 self._msg_count_since_save = 0
 
-    @filter.command("gemini")
+    @filter.regex(r"(?i)^gemini(\s|$)")
     async def on_gemini_command(self, event: AstrMessageEvent):
         """Handle gemini command: merge context, call LLM, reply."""
         group_id = self._get_group_id(event)
