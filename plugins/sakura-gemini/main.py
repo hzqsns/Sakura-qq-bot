@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import random
 from collections import defaultdict
 
 # Ensure the plugin directory is on sys.path so `context` package is importable
@@ -29,6 +30,14 @@ class SakuraGeminiPlugin(Star):
             "你是一个群聊 AI 助手。你可以看到群聊的历史消息作为背景信息，以及与当前提问者的对话历史。请根据上下文给出有帮助的回答。",
         ))
 
+        # Proactive reply: fire after every N messages, with an extra probability gate
+        self.proactive_every_n = int(self.config.get("proactive_every_n", 10))
+        self.proactive_probability = float(self.config.get("proactive_probability", 0.3))
+        self.proactive_prompt = str(self.config.get(
+            "proactive_prompt",
+            "你刚才看了一段群聊记录。作为群里的一员，用你的角色口吻随口插一句你想说的话，要自然，不要像在回答问题。只输出那一句话，不要解释。",
+        ))
+
         self.ctx_mgr = ContextManager(
             group_ctx_max=int(self.config.get("group_ctx_max", 50)),
             user_ctx_max=int(self.config.get("user_ctx_max", 50)),
@@ -38,7 +47,12 @@ class SakuraGeminiPlugin(Star):
         self._db_path = self._get_db_path()
         self.ctx_mgr.load_from_db(self._db_path)
 
+        # Per-user cooldown for @mention replies
         self._cooldowns: dict[tuple[str, str], float] = defaultdict(float)
+        # Per-group: message counter and last proactive reply timestamp
+        self._proactive_counters: dict[str, int] = defaultdict(int)
+        self._proactive_last_ts: dict[str, float] = defaultdict(float)
+
         self._msg_count_since_save = 0
         self._save_interval = 20
 
@@ -89,7 +103,6 @@ class SakuraGeminiPlugin(Star):
 
         segments = []
         while len(text) > segment_length:
-            # Try to break at a paragraph boundary within the window
             cut = text.rfind("\n\n", 0, segment_length)
             if cut == -1:
                 cut = text.rfind("\n", 0, segment_length)
@@ -102,7 +115,7 @@ class SakuraGeminiPlugin(Star):
         return segments
 
     async def _handle_query(self, event: AstrMessageEvent, question: str, image_urls: list[str], has_image: bool):
-        """Core LLM query logic."""
+        """Core LLM query logic for @mention replies."""
         group_id = self._get_group_id(event)
         sender_id = self._get_sender_id(event)
         sender_name = event.get_sender_name()
@@ -124,7 +137,6 @@ class SakuraGeminiPlugin(Star):
         if now - self._cooldowns[cooldown_key] < self.cooldown_seconds:
             return
 
-        # Get provider
         provider = self.context.get_using_provider(event.unified_msg_origin)
         if not provider:
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 未配置 AI 服务，请联系管理员")])
@@ -153,7 +165,6 @@ class SakuraGeminiPlugin(Star):
 
         self._cooldowns[cooldown_key] = now
 
-        # Record Q&A to context
         q_msg = ContextMessage(sender_id, sender_name, question or "[图片提问]", image_urls, now, False)
         a_msg = ContextMessage("bot", "Bot", reply_text, [], now, True)
         self.ctx_mgr.add_group_message(group_id, q_msg)
@@ -161,7 +172,6 @@ class SakuraGeminiPlugin(Star):
         self.ctx_mgr.add_user_message(group_id, sender_id, q_msg)
         self.ctx_mgr.add_user_message(group_id, sender_id, a_msg)
 
-        # Send reply, splitting into segments if too long
         segments = self._split_reply(reply_text, self.segment_length)
         for i, segment in enumerate(segments):
             if i == 0:
@@ -169,9 +179,66 @@ class SakuraGeminiPlugin(Star):
             else:
                 yield event.plain_result(segment)
 
+    async def _try_proactive_reply(self, event: AstrMessageEvent, group_id: str):
+        """Send a proactive message if conditions are met."""
+        if self.proactive_every_n <= 0 or self.proactive_probability <= 0:
+            return
+
+        self._proactive_counters[group_id] += 1
+        if self._proactive_counters[group_id] < self.proactive_every_n:
+            return
+
+        # Hit the N-message threshold — reset counter and apply probability gate
+        self._proactive_counters[group_id] = 0
+        if random.random() > self.proactive_probability:
+            return
+
+        # Cooldown: don't fire too often even if N messages arrive quickly
+        now = time.time()
+        if now - self._proactive_last_ts[group_id] < self.cooldown_seconds:
+            return
+
+        provider = self.context.get_using_provider(event.unified_msg_origin)
+        if not provider:
+            return
+
+        group_ctx = self.ctx_mgr.get_group_context(group_id)
+        if not group_ctx:
+            return
+
+        lines = [
+            f"{'[Bot]' if m.is_bot_reply else f'[{m.sender_name}]'}: {m.content}"
+            for m in group_ctx[-self.proactive_every_n:]
+        ]
+        chat_summary = "\n".join(lines)
+
+        try:
+            resp = await provider.text_chat(
+                prompt=self.proactive_prompt,
+                session_id=f"sakura_proactive_{group_id}",
+                contexts=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "system", "content": f"最近的群聊记录：\n{chat_summary}"},
+                ],
+                persist=False,
+            )
+            reply_text = (resp.completion_text or "").strip()
+        except Exception as e:
+            logger.error(f"主动发言调用失败: {e}")
+            return
+
+        if not reply_text:
+            return
+
+        self._proactive_last_ts[group_id] = now
+        a_msg = ContextMessage("bot", "Bot", reply_text, [], now, True)
+        self.ctx_mgr.add_group_message(group_id, a_msg)
+        logger.info(f"主动发言 [{group_id}]: {reply_text[:30]}...")
+        yield event.plain_result(reply_text)
+
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent):
-        """Passively record all group messages to group context."""
+        """Passively record all group messages; occasionally reply proactively."""
         if event.is_at_or_wake_command:
             return
 
@@ -206,6 +273,10 @@ class SakuraGeminiPlugin(Star):
                 logger.error(f"定期保存上下文失败: {e}")
             finally:
                 self._msg_count_since_save = 0
+
+        # Proactive reply check
+        async for result in self._try_proactive_reply(event, group_id):
+            yield result
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_at_mention(self, event: AstrMessageEvent):
