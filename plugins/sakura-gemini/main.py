@@ -85,57 +85,11 @@ class SakuraGeminiPlugin(Star):
         gid = event.message_obj.group_id if hasattr(event.message_obj, "group_id") else None
         return str(gid) if gid else event.unified_msg_origin
 
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    async def on_group_message(self, event: AstrMessageEvent):
-        """Passively record all group messages to group context."""
-        text, image_urls, has_image, is_command = self._extract_message_parts(event)
-
-        # Skip gemini commands — handled by on_gemini_command
-        if text.lower().startswith(self.trigger_word):
-            return
-
-        if NoiseFilter.should_filter(
-            text=text, has_image=has_image, is_command=is_command, min_length=self.min_msg_length
-        ):
-            return
-
+    async def _handle_gemini_query(self, event: AstrMessageEvent, question: str, image_urls: list[str], has_image: bool):
+        """Core LLM query logic shared by gemini command and @mention handler."""
         group_id = self._get_group_id(event)
         sender_id = self._get_sender_id(event)
         sender_name = event.get_sender_name()
-
-        self.ctx_mgr.add_group_message(
-            group_id,
-            ContextMessage(
-                sender_id=sender_id,
-                sender_name=sender_name,
-                content=text,
-                image_urls=image_urls,
-                timestamp=time.time(),
-                is_bot_reply=False,
-            ),
-        )
-
-        # Periodic SQLite flush — always reset counter even on failure
-        self._msg_count_since_save += 1
-        if self._msg_count_since_save >= self._save_interval:
-            try:
-                self.ctx_mgr.save_to_db(self._db_path)
-            except Exception as e:
-                logger.error(f"定期保存上下文失败: {e}")
-            finally:
-                self._msg_count_since_save = 0
-
-    @filter.regex(r"(?i)^gemini(\s|$)")
-    async def on_gemini_command(self, event: AstrMessageEvent):
-        """Handle gemini command: merge context, call LLM, reply."""
-        group_id = self._get_group_id(event)
-        sender_id = self._get_sender_id(event)
-        sender_name = event.get_sender_name()
-
-        text, image_urls, has_image, _ = self._extract_message_parts(event)
-
-        # Strip trigger word from text
-        question = text[len(self.trigger_word):].strip() if text.lower().startswith(self.trigger_word) else text
 
         # Subcommand: clear memory
         if question == "清除记忆":
@@ -198,6 +152,70 @@ class SakuraGeminiPlugin(Star):
         self.ctx_mgr.add_user_message(group_id, sender_id, a_msg)
 
         yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(f" {reply_text}")])
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def on_group_message(self, event: AstrMessageEvent):
+        """Passively record all group messages to group context."""
+        text, image_urls, has_image, is_command = self._extract_message_parts(event)
+
+        # Skip gemini commands and @bot messages — handled by dedicated handlers
+        if text.lower().startswith(self.trigger_word):
+            return
+        if event.is_at_or_wake_command:
+            return
+
+        if NoiseFilter.should_filter(
+            text=text, has_image=has_image, is_command=is_command, min_length=self.min_msg_length
+        ):
+            return
+
+        group_id = self._get_group_id(event)
+        sender_id = self._get_sender_id(event)
+        sender_name = event.get_sender_name()
+
+        self.ctx_mgr.add_group_message(
+            group_id,
+            ContextMessage(
+                sender_id=sender_id,
+                sender_name=sender_name,
+                content=text,
+                image_urls=image_urls,
+                timestamp=time.time(),
+                is_bot_reply=False,
+            ),
+        )
+
+        # Periodic SQLite flush — always reset counter even on failure
+        self._msg_count_since_save += 1
+        if self._msg_count_since_save >= self._save_interval:
+            try:
+                self.ctx_mgr.save_to_db(self._db_path)
+            except Exception as e:
+                logger.error(f"定期保存上下文失败: {e}")
+            finally:
+                self._msg_count_since_save = 0
+
+    @filter.regex(r"(?i)^gemini(\s|$)")
+    async def on_gemini_command(self, event: AstrMessageEvent):
+        """Handle 'gemini <question>' trigger word command."""
+        text, image_urls, has_image, _ = self._extract_message_parts(event)
+        question = text[len(self.trigger_word):].strip() if text.lower().startswith(self.trigger_word) else text
+        async for result in self._handle_gemini_query(event, question, image_urls, has_image):
+            yield result
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def on_at_mention(self, event: AstrMessageEvent):
+        """Handle @bot mentions in group chat."""
+        if not event.is_at_or_wake_command:
+            return
+        text, image_urls, has_image, is_command = self._extract_message_parts(event)
+        # If the message also starts with trigger word, let on_gemini_command handle it
+        if text.lower().startswith(self.trigger_word):
+            return
+        if is_command:
+            return
+        async for result in self._handle_gemini_query(event, text, image_urls, has_image):
+            yield result
 
     async def terminate(self):
         try:
