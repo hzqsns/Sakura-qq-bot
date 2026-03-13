@@ -70,7 +70,6 @@ class ContextManager:
         group_id: str,
         user_id: str,
         current_content: str,
-        current_image_urls: list[str],
         system_prompt: str,
     ) -> list[dict]:
         """
@@ -80,7 +79,8 @@ class ContextManager:
           1. system prompt
           2. group chat history as a system context block (background)
           3. user's prior Q&A pairs as user/assistant turns (continuity)
-          4. current question (user turn, multimodal if images present)
+          4. current question as final user turn (text only — images are
+             passed separately to provider.text_chat via image_urls kwarg)
         """
         messages: list[dict] = []
 
@@ -104,15 +104,7 @@ class ContextManager:
             role = "assistant" if msg.is_bot_reply else "user"
             messages.append({"role": role, "content": msg.content})
 
-        if current_image_urls:
-            content: list[dict] = []
-            if current_content:
-                content.append({"type": "text", "text": current_content})
-            for url in current_image_urls:
-                content.append({"type": "image_url", "image_url": {"url": url}})
-            messages.append({"role": "user", "content": content})
-        else:
-            messages.append({"role": "user", "content": current_content})
+        messages.append({"role": "user", "content": current_content or "请看图片"})
 
         return messages
 
@@ -165,7 +157,7 @@ class ContextManager:
             conn.close()
 
     def load_from_db(self, db_path: str) -> None:
-        """Load context from SQLite, silently skip missing file or expired rows."""
+        """Load context from SQLite, silently skip missing file, expired rows, or corrupted DB."""
         if not os.path.exists(db_path):
             return
         conn = sqlite3.connect(db_path)
@@ -192,5 +184,8 @@ class ContextManager:
                     self.add_group_message(group_id, msg)
                 elif ctx_type == "user":
                     self.add_user_message(group_id, user_id, msg)
+        except sqlite3.DatabaseError:
+            # Corrupted or schema-mismatched DB — start fresh rather than crash on startup
+            pass
         finally:
             conn.close()

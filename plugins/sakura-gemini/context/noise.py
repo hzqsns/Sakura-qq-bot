@@ -20,4 +20,4 @@ class NoiseFilter:
             return True
         if has_image:
             return False
-        return len(text.strip()) < min_length
+        return len((text or "").strip()) < min_length

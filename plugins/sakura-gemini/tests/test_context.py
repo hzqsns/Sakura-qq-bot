@@ -1,7 +1,9 @@
-# plugins/sakura-gemini/tests/test_context.py
+import os
+import tempfile
 import time
+
 import pytest
-from context import ContextMessage, ContextManager
+from context import ContextMessage, ContextManager, NoiseFilter
 
 
 class TestContextMessage:
@@ -53,12 +55,10 @@ class TestContextMessage:
 
 class TestContextManagerBasic:
     def test_init(self):
-        mgr = ContextManager(
-            group_ctx_max=50,
-            user_ctx_max=50,
-            ctx_expire_seconds=1800,
-        )
-        assert mgr is not None
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        assert mgr.group_ctx_max == 50
+        assert mgr.user_ctx_max == 50
+        assert mgr.ctx_expire_seconds == 1800
 
     def test_add_group_message(self):
         mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
@@ -103,9 +103,6 @@ class TestContextManagerBasic:
         assert len(ctx) == 0
 
 
-from context import NoiseFilter
-
-
 class TestNoiseFilter:
     def test_short_text_filtered(self):
         assert NoiseFilter.should_filter(text="哈", has_image=False, is_command=False, min_length=3) is True
@@ -125,9 +122,8 @@ class TestNoiseFilter:
     def test_whitespace_only_filtered(self):
         assert NoiseFilter.should_filter(text="   ", has_image=False, is_command=False, min_length=3) is True
 
-
-import os
-import tempfile
+    def test_none_text_filtered(self):
+        assert NoiseFilter.should_filter(text=None, has_image=False, is_command=False, min_length=3) is True
 
 
 class TestSQLitePersistence:
@@ -174,6 +170,14 @@ class TestSQLitePersistence:
         mgr.load_from_db("/nonexistent/path.db")
         assert mgr.get_group_context("g1") == []
 
+    def test_load_corrupted_db(self):
+        # Write garbage bytes to simulate a corrupted DB
+        with open(self.db_path, "wb") as f:
+            f.write(b"not a valid sqlite database")
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+        mgr.load_from_db(self.db_path)  # must not raise
+        assert mgr.get_group_context("g1") == []
+
 
 class TestContextMerging:
     def test_build_llm_context_with_both_layers(self):
@@ -190,7 +194,6 @@ class TestContextMerging:
             group_id="g1",
             user_id="u1",
             current_content="explain generics",
-            current_image_urls=[],
             system_prompt="You are a helpful assistant.",
         )
 
@@ -209,23 +212,20 @@ class TestContextMerging:
             group_id="g1",
             user_id="u1",
             current_content="hello",
-            current_image_urls=[],
             system_prompt="You are helpful.",
         )
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
 
-    def test_build_llm_context_with_images(self):
+    def test_build_llm_context_empty_content_with_image(self):
+        # When current_content is empty (image-only question), fallback text is used
         mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
         messages = mgr.build_llm_messages(
             group_id="g1",
             user_id="u1",
-            current_content="what is this?",
-            current_image_urls=["https://example.com/img.jpg"],
+            current_content="",
             system_prompt="You are helpful.",
         )
-        last_msg = messages[-1]
-        assert last_msg["role"] == "user"
-        assert isinstance(last_msg["content"], list)
-        assert any(item.get("type") == "image_url" for item in last_msg["content"])
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"] == "请看图片"
