@@ -1,6 +1,10 @@
 import os
+import sys
 import time
 from collections import defaultdict
+
+# Ensure the plugin directory is on sys.path so `context` package is importable
+sys.path.insert(0, os.path.dirname(__file__))
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
