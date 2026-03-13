@@ -13,7 +13,7 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.message_components import Plain, Image
 import astrbot.api.message_components as Comp
 
-from context import ContextManager, ContextMessage, NoiseFilter
+from context import ContextManager, ContextMessage, NoiseFilter, PromptGuard
 
 
 @register("sakura_gemini", "heziqi", "群聊 AI 助手，支持文字+图片问答、双层上下文", "0.1.0")
@@ -124,6 +124,11 @@ class SakuraGeminiPlugin(Star):
         if question == "清除记忆":
             self.ctx_mgr.clear_user_context(group_id, sender_id)
             yield event.plain_result("已清除你的对话记忆。")
+            return
+
+        # Prompt injection guard
+        if PromptGuard.is_injection(question):
+            yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 哼，这种小把戏想骗我？才不会上当呢！")])
             return
 
         # Empty input

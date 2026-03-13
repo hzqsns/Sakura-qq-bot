@@ -9,5 +9,6 @@ Public API:
 from .models import ContextMessage
 from .store import ContextManager
 from .noise import NoiseFilter
+from .guard import PromptGuard
 
-__all__ = ["ContextMessage", "ContextManager", "NoiseFilter"]
+__all__ = ["ContextMessage", "ContextManager", "NoiseFilter", "PromptGuard"]
