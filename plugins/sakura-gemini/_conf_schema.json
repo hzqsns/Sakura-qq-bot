@@ -1,9 +1,4 @@
 {
-  "trigger_word": {
-    "type": "string",
-    "description": "触发词，群聊中以此开头的消息会触发 AI 问答",
-    "default": "gemini"
-  },
   "group_ctx_max": {
     "type": "int",
     "description": "群级上下文最大条数",
@@ -24,14 +19,14 @@
     "description": "噪音过滤：纯文字消息最短长度，低于此长度的消息不记录到上下文",
     "default": 3
   },
-  "max_reply_length": {
+  "segment_length": {
     "type": "int",
-    "description": "AI 回复最大字符数，超出截断",
-    "default": 500
+    "description": "回复分段长度（字符数），超过此长度自动拆成多条消息发送",
+    "default": 300
   },
   "cooldown_seconds": {
     "type": "int",
-    "description": "同群冷却时间（秒），冷却期间的请求静默忽略",
+    "description": "每用户冷却时间（秒），冷却期间的请求静默忽略",
     "default": 10
   },
   "system_prompt": {

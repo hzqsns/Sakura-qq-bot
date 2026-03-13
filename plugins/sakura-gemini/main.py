@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.message_components import Plain, Image, Face
+from astrbot.api.message_components import Plain, Image
 import astrbot.api.message_components as Comp
 
 from context import ContextManager, ContextMessage, NoiseFilter
@@ -21,9 +21,8 @@ class SakuraGeminiPlugin(Star):
         super().__init__(context)
         self.config = config
 
-        self.trigger_word = str(self.config.get("trigger_word", "gemini"))
         self.cooldown_seconds = int(self.config.get("cooldown_seconds", 10))
-        self.max_reply_length = int(self.config.get("max_reply_length", 500))
+        self.segment_length = int(self.config.get("segment_length", 300))
         self.min_msg_length = int(self.config.get("min_msg_length", 3))
         self.system_prompt = str(self.config.get(
             "system_prompt",
@@ -39,13 +38,11 @@ class SakuraGeminiPlugin(Star):
         self._db_path = self._get_db_path()
         self.ctx_mgr.load_from_db(self._db_path)
 
-        # Per-user cooldown: key=(group_id, sender_id), value=last_trigger_timestamp
-        # defaultdict(float) returns 0.0 for new keys, so the first request is always allowed.
         self._cooldowns: dict[tuple[str, str], float] = defaultdict(float)
         self._msg_count_since_save = 0
         self._save_interval = 20
 
-        logger.info(f"Sakura Gemini 插件已加载，触发词: {self.trigger_word}")
+        logger.info("Sakura Gemini 插件已加载，触发方式: @机器人")
 
     def _get_db_path(self) -> str:
         data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -85,8 +82,27 @@ class SakuraGeminiPlugin(Star):
         gid = event.message_obj.group_id if hasattr(event.message_obj, "group_id") else None
         return str(gid) if gid else event.unified_msg_origin
 
-    async def _handle_gemini_query(self, event: AstrMessageEvent, question: str, image_urls: list[str], has_image: bool):
-        """Core LLM query logic shared by gemini command and @mention handler."""
+    def _split_reply(self, text: str, segment_length: int) -> list[str]:
+        """Split reply into segments, preferring paragraph breaks."""
+        if len(text) <= segment_length:
+            return [text]
+
+        segments = []
+        while len(text) > segment_length:
+            # Try to break at a paragraph boundary within the window
+            cut = text.rfind("\n\n", 0, segment_length)
+            if cut == -1:
+                cut = text.rfind("\n", 0, segment_length)
+            if cut == -1:
+                cut = segment_length
+            segments.append(text[:cut].strip())
+            text = text[cut:].strip()
+        if text:
+            segments.append(text)
+        return segments
+
+    async def _handle_query(self, event: AstrMessageEvent, question: str, image_urls: list[str], has_image: bool):
+        """Core LLM query logic."""
         group_id = self._get_group_id(event)
         sender_id = self._get_sender_id(event)
         sender_name = event.get_sender_name()
@@ -102,7 +118,7 @@ class SakuraGeminiPlugin(Star):
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 请输入你的问题")])
             return
 
-        # Per-user cooldown check (set AFTER successful response to avoid penalising failures)
+        # Per-user cooldown
         now = time.time()
         cooldown_key = (group_id, sender_id)
         if now - self._cooldowns[cooldown_key] < self.cooldown_seconds:
@@ -114,7 +130,6 @@ class SakuraGeminiPlugin(Star):
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 未配置 AI 服务，请联系管理员")])
             return
 
-        # Build context history (text only — images routed separately via image_urls kwarg)
         messages = self.ctx_mgr.build_llm_messages(
             group_id=group_id,
             user_id=sender_id,
@@ -126,24 +141,19 @@ class SakuraGeminiPlugin(Star):
             resp = await provider.text_chat(
                 prompt=question or "请看图片",
                 session_id=f"sakura_{group_id}_{sender_id}",
-                contexts=messages[:-1],       # history without the final user turn
-                image_urls=image_urls or None, # images passed directly to provider
+                contexts=messages[:-1],
+                image_urls=image_urls or None,
                 persist=False,
             )
             reply_text = resp.completion_text or "抱歉，我无法生成回复。"
         except Exception as e:
-            logger.error(f"Gemini 调用失败: {e}")
+            logger.error(f"AI 调用失败: {e}")
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 请求失败，请稍后再试")])
             return
 
-        # Cooldown starts only after a successful call
         self._cooldowns[cooldown_key] = now
 
-        # Truncate if too long
-        if len(reply_text) > self.max_reply_length:
-            reply_text = reply_text[:self.max_reply_length] + "\n...(内容过长，已截取)"
-
-        # Record Q&A to both context layers
+        # Record Q&A to context
         q_msg = ContextMessage(sender_id, sender_name, question or "[图片提问]", image_urls, now, False)
         a_msg = ContextMessage("bot", "Bot", reply_text, [], now, True)
         self.ctx_mgr.add_group_message(group_id, q_msg)
@@ -151,18 +161,21 @@ class SakuraGeminiPlugin(Star):
         self.ctx_mgr.add_user_message(group_id, sender_id, q_msg)
         self.ctx_mgr.add_user_message(group_id, sender_id, a_msg)
 
-        yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(f" {reply_text}")])
+        # Send reply, splitting into segments if too long
+        segments = self._split_reply(reply_text, self.segment_length)
+        for i, segment in enumerate(segments):
+            if i == 0:
+                yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(f" {segment}")])
+            else:
+                yield event.plain_result(segment)
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent):
         """Passively record all group messages to group context."""
-        text, image_urls, has_image, is_command = self._extract_message_parts(event)
-
-        # Skip gemini commands and @bot messages — handled by dedicated handlers
-        if text.lower().startswith(self.trigger_word):
-            return
         if event.is_at_or_wake_command:
             return
+
+        text, image_urls, has_image, is_command = self._extract_message_parts(event)
 
         if NoiseFilter.should_filter(
             text=text, has_image=has_image, is_command=is_command, min_length=self.min_msg_length
@@ -185,7 +198,6 @@ class SakuraGeminiPlugin(Star):
             ),
         )
 
-        # Periodic SQLite flush — always reset counter even on failure
         self._msg_count_since_save += 1
         if self._msg_count_since_save >= self._save_interval:
             try:
@@ -195,26 +207,15 @@ class SakuraGeminiPlugin(Star):
             finally:
                 self._msg_count_since_save = 0
 
-    @filter.regex(r"(?i)^gemini(\s|$)")
-    async def on_gemini_command(self, event: AstrMessageEvent):
-        """Handle 'gemini <question>' trigger word command."""
-        text, image_urls, has_image, _ = self._extract_message_parts(event)
-        question = text[len(self.trigger_word):].strip() if text.lower().startswith(self.trigger_word) else text
-        async for result in self._handle_gemini_query(event, question, image_urls, has_image):
-            yield result
-
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_at_mention(self, event: AstrMessageEvent):
         """Handle @bot mentions in group chat."""
         if not event.is_at_or_wake_command:
             return
         text, image_urls, has_image, is_command = self._extract_message_parts(event)
-        # If the message also starts with trigger word, let on_gemini_command handle it
-        if text.lower().startswith(self.trigger_word):
-            return
         if is_command:
             return
-        async for result in self._handle_gemini_query(event, text, image_urls, has_image):
+        async for result in self._handle_query(event, text, image_urls, has_image):
             yield result
 
     async def terminate(self):
