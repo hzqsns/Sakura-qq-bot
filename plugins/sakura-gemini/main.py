@@ -237,33 +237,18 @@ class SakuraGeminiPlugin(Star):
         if now - self._cooldowns[cooldown_key] < self.cooldown_seconds:
             return
 
-        provider = self.context.get_using_provider(event.unified_msg_origin)
-        if not provider:
-            yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 未配置 AI 服务，请联系管理员")])
-            return
+        group_context_text = self.ctx_mgr.format_group_context(group_id)
+        user_contexts = self.ctx_mgr.build_user_contexts(group_id, sender_id)
 
-        beijing_tz = timezone(timedelta(hours=8))
-        now_str = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
-        dynamic_system_prompt = f"当前北京时间：{now_str}\n\n{self.system_prompt}"
-
-        messages = self.ctx_mgr.build_llm_messages(
-            group_id=group_id,
-            user_id=sender_id,
-            current_content=question,
-            system_prompt=dynamic_system_prompt,
+        reply_text = await self._call_agent(
+            event=event,
+            prompt=question,
+            user_contexts=user_contexts,
+            group_context_text=group_context_text,
+            image_urls=image_urls,
         )
 
-        try:
-            resp = await provider.text_chat(
-                prompt=question or "请看图片",
-                session_id=f"sakura_{group_id}_{sender_id}",
-                contexts=messages[:-1],
-                image_urls=image_urls or None,
-                persist=False,
-            )
-            reply_text = resp.completion_text or "抱歉，我无法生成回复。"
-        except Exception as e:
-            logger.error(f"AI 调用失败: {e}")
+        if reply_text is None:
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 请求失败，请稍后再试")])
             return
 
@@ -307,34 +292,19 @@ class SakuraGeminiPlugin(Star):
         if now - self._proactive_last_ts[group_id] < self.cooldown_seconds:
             return
 
-        provider = self.context.get_using_provider(event.unified_msg_origin)
-        if not provider:
+        group_context_text = self.ctx_mgr.format_group_context(
+            group_id, n=self.proactive_every_n
+        )
+        if not group_context_text:
             return
 
-        group_ctx = self.ctx_mgr.get_group_context(group_id)
-        if not group_ctx:
-            return
-
-        lines = [
-            f"{'[Bot]' if m.is_bot_reply else f'[{m.sender_name}]'}: {m.content}"
-            for m in group_ctx[-self.proactive_every_n:]
-        ]
-        chat_summary = "\n".join(lines)
-
-        try:
-            resp = await provider.text_chat(
-                prompt=self.proactive_prompt,
-                session_id=f"sakura_proactive_{group_id}",
-                contexts=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "system", "content": f"最近的群聊记录：\n{chat_summary}"},
-                ],
-                persist=False,
-            )
-            reply_text = (resp.completion_text or "").strip()
-        except Exception as e:
-            logger.error(f"主动发言调用失败: {e}")
-            return
+        reply_text = await self._call_agent(
+            event=event,
+            prompt=self.proactive_prompt,
+            user_contexts=[],
+            group_context_text=group_context_text,
+            image_urls=[],
+        )
 
         if not reply_text:
             return
