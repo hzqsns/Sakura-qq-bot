@@ -160,7 +160,7 @@ class SakuraGeminiPlugin(Star):
         """
         from astrbot.core.astr_main_agent import build_main_agent
         from astrbot.core.provider.entities import ProviderRequest
-        from astrbot.core.provider.entites import TextPart
+        from astrbot.core.agent.message import TextPart
         from astrbot.core.astr_agent_run_util import run_agent
 
         req = ProviderRequest()
