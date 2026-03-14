@@ -63,6 +63,41 @@ class ContextManager:
             if not msg.is_expired(self.ctx_expire_seconds)
         ]
 
+    def format_group_context(self, group_id: str, n: int = 0) -> str:
+        """Format recent group messages as a plain-text block for LLM injection.
+
+        Args:
+            group_id: The group to format context for.
+            n: If > 0, only the last n messages are included. 0 = all.
+
+        Returns:
+            Multi-line string like '[Alice]: hello\\n[Bot]: hi there', or '' if empty.
+        """
+        ctx = self.get_group_context(group_id)
+        if n > 0:
+            ctx = ctx[-n:]
+        if not ctx:
+            return ""
+        lines = []
+        for msg in ctx:
+            prefix = "[Bot]" if msg.is_bot_reply else f"[{msg.sender_name}]"
+            line = f"{prefix}: {msg.content}"
+            if msg.image_urls:
+                line += " [图片]"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def build_user_contexts(self, group_id: str, user_id: str) -> list[dict]:
+        """Return user Q&A history as OpenAI-format messages.
+
+        Suitable for passing directly to ProviderRequest.contexts.
+        Expired messages are excluded.
+        """
+        return [
+            {"role": "assistant" if msg.is_bot_reply else "user", "content": msg.content}
+            for msg in self.get_user_context(group_id, user_id)
+        ]
+
     # ── LLM message building ───────────────────────────────────────────────
 
     def build_llm_messages(

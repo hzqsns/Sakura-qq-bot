@@ -229,3 +229,63 @@ class TestContextMerging:
         )
         assert messages[-1]["role"] == "user"
         assert messages[-1]["content"] == "请看图片"
+
+
+class TestContextManagerFormatters:
+    def _make_mgr(self):
+        return ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=1800)
+
+    def test_format_group_context_empty(self):
+        mgr = self._make_mgr()
+        assert mgr.format_group_context("g1") == ""
+
+    def test_format_group_context_basic(self):
+        mgr = self._make_mgr()
+        now = time.time()
+        mgr.add_group_message("g1", ContextMessage("u1", "Alice", "hello", [], now, False))
+        mgr.add_group_message("g1", ContextMessage("bot", "Bot", "hi there", [], now, True))
+        result = mgr.format_group_context("g1")
+        assert "[Alice]: hello" in result
+        assert "[Bot]: hi there" in result
+
+    def test_format_group_context_with_image(self):
+        mgr = self._make_mgr()
+        mgr.add_group_message("g1", ContextMessage("u1", "Alice", "look", ["http://img.jpg"], time.time(), False))
+        result = mgr.format_group_context("g1")
+        assert "[图片]" in result
+
+    def test_format_group_context_n_limit(self):
+        mgr = self._make_mgr()
+        now = time.time()
+        for i in range(5):
+            mgr.add_group_message("g1", ContextMessage("u1", "Alice", f"msg{i}", [], now, False))
+        result = mgr.format_group_context("g1", n=2)
+        lines = result.strip().split("\n")
+        assert len(lines) == 2
+        assert "msg3" in lines[0]
+        assert "msg4" in lines[1]
+
+    def test_build_user_contexts_empty(self):
+        mgr = self._make_mgr()
+        result = mgr.build_user_contexts("g1", "u1")
+        assert result == []
+
+    def test_build_user_contexts_qa_pair(self):
+        mgr = self._make_mgr()
+        now = time.time()
+        mgr.add_user_message("g1", "u1", ContextMessage("u1", "Alice", "what is python?", [], now, False))
+        mgr.add_user_message("g1", "u1", ContextMessage("bot", "Bot", "Python is a language.", [], now, True))
+        result = mgr.build_user_contexts("g1", "u1")
+        assert len(result) == 2
+        assert result[0] == {"role": "user", "content": "what is python?"}
+        assert result[1] == {"role": "assistant", "content": "Python is a language."}
+
+    def test_build_user_contexts_filters_expired(self):
+        mgr = ContextManager(group_ctx_max=50, user_ctx_max=50, ctx_expire_seconds=60)
+        old = ContextMessage("u1", "Alice", "old question", [], time.time() - 120, False)
+        new = ContextMessage("u1", "Alice", "new question", [], time.time(), False)
+        mgr.add_user_message("g1", "u1", old)
+        mgr.add_user_message("g1", "u1", new)
+        result = mgr.build_user_contexts("g1", "u1")
+        assert len(result) == 1
+        assert result[0]["content"] == "new question"
