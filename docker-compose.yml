@@ -1,0 +1,39 @@
+services:
+  astrbot:
+    image: soulter/astrbot:latest
+    container_name: astrbot
+    restart: unless-stopped
+    ports:
+      - "${ASTRBOT_WEBUI_PORT:-6185}:6185"
+      - "${ASTRBOT_ONEBOT_PORT:-6199}:6199"
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+    volumes:
+      - ./data/astrbot:/AstrBot/data
+      - ./plugins:/AstrBot/data/plugins
+    depends_on:
+      - napcat
+    networks:
+      - qqbot
+
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    ports:
+      - "${NAPCAT_WS_PORT:-3000}:3000"
+      - "${NAPCAT_HTTP_PORT:-3001}:3001"
+      - "${NAPCAT_WEBUI_PORT:-6099}:6099"
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      NAPCAT_UID: "${NAPCAT_UID}"
+      NAPCAT_GID: "${NAPCAT_GID}"
+    volumes:
+      - ./data/napcat/config:/app/napcat/config
+      - ./data/napcat/qq:/app/.config/QQ
+    networks:
+      - qqbot
+
+networks:
+  qqbot:
+    driver: bridge

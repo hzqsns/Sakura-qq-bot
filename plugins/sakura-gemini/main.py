@@ -33,6 +33,18 @@ class SakuraGeminiPlugin(Star):
         # Proactive reply: fire after every N messages, with an extra probability gate
         self.proactive_every_n = int(self.config.get("proactive_every_n", 10))
         self.proactive_probability = float(self.config.get("proactive_probability", 0.3))
+        self.render_probability = float(self.config.get("render_probability", 0.5))
+
+        # When True, skip LLM calls and delegate @mention responses to angel_heart
+        self.delegate_to_angel_heart = bool(self.config.get("delegate_to_angel_heart", False))
+
+        # Admin QQ list for bot control commands (comma-separated)
+        admin_raw = str(self.config.get("admin_qq_list", ""))
+        self.admin_qq_list: set[str] = {x.strip() for x in admin_raw.split(",") if x.strip()}
+
+        # Per-group pause state (resets on plugin reload)
+        self._paused_groups: set[str] = set()
+
         self.proactive_prompt = str(self.config.get(
             "proactive_prompt",
             "你刚才看了一段群聊记录。作为群里的一员，用你的角色口吻随口插一句你想说的话，要自然，不要像在回答问题。只输出那一句话，不要解释。",
@@ -128,12 +140,14 @@ class SakuraGeminiPlugin(Star):
 
         # Prompt injection guard
         if PromptGuard.is_injection(question):
-            yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 哼，这种小把戏想骗我？才不会上当呢！")])
+            yield event.chain_result([Comp.At(qq=sender_id)])
+            yield event.plain_result("哼，这种小把戏想骗我？才不会上当呢！")
             return
 
         # Empty input
         if not question and not has_image:
-            yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 请输入你的问题")])
+            yield event.chain_result([Comp.At(qq=sender_id)])
+            yield event.plain_result("请输入你的问题")
             return
 
         # Per-user cooldown
@@ -178,11 +192,16 @@ class SakuraGeminiPlugin(Star):
         self.ctx_mgr.add_user_message(group_id, sender_id, a_msg)
 
         segments = self._split_reply(reply_text, self.segment_length)
-        for i, segment in enumerate(segments):
-            if i == 0:
-                yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(f" {segment}")])
-            else:
+        use_render = random.random() < self.render_probability
+        if use_render:
+            # Send @mention separately so 传话筒 sees pure-text messages and renders them
+            yield event.chain_result([Comp.At(qq=sender_id)])
+            for segment in segments:
                 yield event.plain_result(segment)
+        else:
+            # Merge @mention with text so 传话筒 skips rendering (has_non_text=True)
+            full_text = "\n".join(segments)
+            yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(f" {full_text}")])
 
     async def _try_proactive_reply(self, event: AstrMessageEvent, group_id: str):
         """Send a proactive message if conditions are met."""
@@ -241,10 +260,17 @@ class SakuraGeminiPlugin(Star):
         logger.info(f"主动发言 [{group_id}]: {reply_text[:30]}...")
         yield event.plain_result(reply_text)
 
+    _BOT_OFF_CMDS = {"暂停", "休息", "下线", "关闭", "/off"}
+    _BOT_ON_CMDS = {"恢复", "上线", "开启", "/on"}
+
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message(self, event: AstrMessageEvent):
         """Passively record all group messages; occasionally reply proactively."""
         if event.is_at_or_wake_command:
+            return
+
+        group_id = self._get_group_id(event)
+        if group_id in self._paused_groups:
             return
 
         text, image_urls, has_image, is_command = self._extract_message_parts(event)
@@ -254,7 +280,6 @@ class SakuraGeminiPlugin(Star):
         ):
             return
 
-        group_id = self._get_group_id(event)
         sender_id = self._get_sender_id(event)
         sender_name = event.get_sender_name()
 
@@ -279,9 +304,16 @@ class SakuraGeminiPlugin(Star):
             finally:
                 self._msg_count_since_save = 0
 
-        # Proactive reply check
-        async for result in self._try_proactive_reply(event, group_id):
-            yield result
+        # Proactive reply check (disabled when delegating to angel_heart)
+        if not self.delegate_to_angel_heart:
+            async for result in self._try_proactive_reply(event, group_id):
+                yield result
+
+    _PLUGIN_KEYWORDS = (
+        "点歌", "网易点歌", "QQ点歌", "酷狗点歌", "酷我点歌",
+        "查歌词", "歌单收藏", "歌单取藏", "歌单列表", "歌单点歌",
+        "群分析", "group_analysis", "分析设置", "设置格式",
+    )
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_at_mention(self, event: AstrMessageEvent):
@@ -290,6 +322,44 @@ class SakuraGeminiPlugin(Star):
             return
         text, image_urls, has_image, is_command = self._extract_message_parts(event)
         if is_command:
+            return
+
+        group_id = self._get_group_id(event)
+        sender_id = self._get_sender_id(event)
+        cmd = text.strip()
+
+        # Bot control commands (admin only)
+        if cmd in self._BOT_OFF_CMDS or cmd in self._BOT_ON_CMDS:
+            if self.admin_qq_list and sender_id not in self.admin_qq_list:
+                yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 你没有权限控制我哦")])
+                return
+            if cmd in self._BOT_OFF_CMDS:
+                self._paused_groups.add(group_id)
+                logger.info(f"Bot paused in group {group_id} by {sender_id}")
+                yield event.plain_result("好，先去休息了，有事叫我。")
+            else:
+                self._paused_groups.discard(group_id)
+                logger.info(f"Bot resumed in group {group_id} by {sender_id}")
+                yield event.plain_result("回来了！")
+            return
+
+        # Silently ignore all @mentions when paused
+        if group_id in self._paused_groups:
+            return
+
+        # Let other plugins handle their own keywords; add emoji only for those
+        first_word = text.split()[0] if text.split() else ""
+        if first_word in self._PLUGIN_KEYWORDS:
+            try:
+                msg_id = event.message_obj.message_id
+                bot = getattr(event, "bot", None)
+                if bot and msg_id:
+                    await bot.call_action("set_msg_emoji_like", message_id=msg_id, emoji_id="212")
+            except Exception:
+                pass
+            return
+        # In delegate mode, let angel_heart handle the actual LLM response
+        if self.delegate_to_angel_heart:
             return
         async for result in self._handle_query(event, text, image_urls, has_image):
             yield result

@@ -48,5 +48,20 @@
     "type": "string",
     "description": "AI 系统提示词（角色设定）",
     "default": "你是一个群聊 AI 助手。你可以看到群聊的历史消息作为背景信息，以及与当前提问者的对话历史。请根据上下文给出有帮助的回答。"
+  },
+  "render_probability": {
+    "type": "float",
+    "description": "触发立绘渲染插件（如传话筒）的概率（0.0~1.0，0=始终文字，1=始终图片，默认0.5）",
+    "default": 0.5
+  },
+  "delegate_to_angel_heart": {
+    "type": "bool",
+    "description": "委托模式：开启后 @提及 的 LLM 回复和主动发言均由 angel_heart 插件负责，sakura-gemini 只保留表情回应和关键词过滤",
+    "default": false
+  },
+  "admin_qq_list": {
+    "type": "string",
+    "description": "管理员 QQ 号列表（英文逗号分隔），可在群内 @Bot 发送「暂停」/「恢复」控制 Bot。留空则任何人都可控制。",
+    "default": ""
   }
 }

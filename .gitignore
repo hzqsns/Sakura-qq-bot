@@ -1,0 +1,20 @@
+.worktrees/
+.env
+__pycache__/
+.pytest_cache/
+
+data/astrbot/*
+!data/astrbot/.gitkeep
+data/napcat/config/*
+!data/napcat/config/.gitkeep
+data/napcat/qq/*
+!data/napcat/qq/.gitkeep
+data/summary_logs/*
+!data/summary_logs/.gitkeep
+
+# Third-party plugins (installed separately)
+plugins/astrbot_plugin_*/
+
+# Plugin runtime data and backups
+plugins/sakura-gemini/data/
+*.bak
