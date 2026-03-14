@@ -3,8 +3,6 @@ import sys
 import time
 import random
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
-
 # Ensure the plugin directory is on sys.path so `context` package is importable
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -26,10 +24,6 @@ class SakuraGeminiPlugin(Star):
         self.cooldown_seconds = int(self.config.get("cooldown_seconds", 10))
         self.segment_length = int(self.config.get("segment_length", 300))
         self.min_msg_length = int(self.config.get("min_msg_length", 3))
-        self.system_prompt = str(self.config.get(
-            "system_prompt",
-            "你是一个群聊 AI 助手。你可以看到群聊的历史消息作为背景信息，以及与当前提问者的对话历史。请根据上下文给出有帮助的回答。",
-        ))
 
         # Proactive reply: fire after every N messages, with an extra probability gate
         self.proactive_every_n = int(self.config.get("proactive_every_n", 10))
