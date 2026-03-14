@@ -173,6 +173,23 @@ class SakuraGeminiPlugin(Star):
                 TextPart(text=f"<group_context>\n{group_context_text}\n</group_context>")
             )
 
+        # Attach conversation so build_main_agent can inject persona/datetime.
+        # We intentionally do NOT overwrite req.contexts with conversation.history
+        # because we manage context ourselves via ContextManager.
+        try:
+            conv_mgr = self.context.conversation_manager
+            umo = event.unified_msg_origin
+            cid = await conv_mgr.get_curr_conversation_id(umo)
+            if not cid:
+                cid = await conv_mgr.new_conversation(umo, event.get_platform_id())
+            conversation = await conv_mgr.get_conversation(umo, cid)
+            if not conversation:
+                cid = await conv_mgr.new_conversation(umo, event.get_platform_id())
+                conversation = await conv_mgr.get_conversation(umo, cid)
+            req.conversation = conversation
+        except Exception as e:
+            logger.warning(f"无法获取 conversation，人格可能不生效: {e}")
+
         try:
             build_result = await build_main_agent(
                 event=event,
