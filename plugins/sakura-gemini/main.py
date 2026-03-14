@@ -3,6 +3,7 @@ import sys
 import time
 import random
 from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 
 # Ensure the plugin directory is on sys.path so `context` package is importable
 sys.path.insert(0, os.path.dirname(__file__))
@@ -126,6 +127,86 @@ class SakuraGeminiPlugin(Star):
             segments.append(text)
         return segments
 
+    def _build_agent_cfg(self):
+        """Build MainAgentBuildConfig from AstrBot's global config.
+
+        Reads provider_settings, timezone, cron tools toggle, etc. from the
+        live AstrBot config so all framework features (persona, datetime,
+        web search, tool calling) are applied when build_main_agent runs.
+        """
+        from astrbot.core.astr_main_agent import MainAgentBuildConfig
+
+        cfg = self.context.get_config()
+        settings = cfg.get("provider_settings", {})
+        proactive_cfg = cfg.get("proactive_capability", {})
+
+        return MainAgentBuildConfig(
+            tool_call_timeout=settings.get("tool_call_timeout", 60),
+            provider_settings=settings,
+            add_cron_tools=proactive_cfg.get("add_cron_tools", True),
+            timezone=cfg.get("timezone"),
+            streaming_response=False,
+        )
+
+    async def _call_agent(
+        self,
+        event: AstrMessageEvent,
+        prompt: str,
+        user_contexts: list[dict],
+        group_context_text: str,
+        image_urls: list[str],
+    ) -> str | None:
+        """Unified LLM call via AstrBot's build_main_agent pipeline.
+
+        Injects group context as an extra user content part so AstrBot's
+        framework features (persona, datetime, web search, tools) all
+        apply normally on top of our custom context.
+
+        Returns completion text, or None on failure (caller handles error reply).
+        """
+        from astrbot.core.astr_main_agent import build_main_agent
+        from astrbot.core.provider.entities import ProviderRequest
+        from astrbot.core.provider.entites import TextPart
+        from astrbot.core.astr_agent_run_util import run_agent
+
+        req = ProviderRequest()
+        req.prompt = prompt or "请看图片"
+        req.image_urls = image_urls or []
+        req.contexts = user_contexts  # user Q&A history (OpenAI format)
+
+        if group_context_text:
+            req.extra_user_content_parts.append(
+                TextPart(text=f"<group_context>\n{group_context_text}\n</group_context>")
+            )
+
+        try:
+            build_result = await build_main_agent(
+                event=event,
+                plugin_context=self.context,
+                config=self._build_agent_cfg(),
+                req=req,
+                apply_reset=False,
+            )
+            if build_result is None:
+                return None
+
+            if build_result.reset_coro:
+                await build_result.reset_coro
+
+            async for _ in run_agent(
+                build_result.agent_runner,
+                max_step=10,
+                show_tool_use=False,
+            ):
+                pass
+
+            final_resp = build_result.agent_runner.get_final_llm_resp()
+            return final_resp.completion_text if final_resp else None
+
+        except Exception as e:
+            logger.error(f"AI 调用失败: {e}")
+            return None
+
     async def _handle_query(self, event: AstrMessageEvent, question: str, image_urls: list[str], has_image: bool):
         """Core LLM query logic for @mention replies."""
         group_id = self._get_group_id(event)
@@ -161,11 +242,15 @@ class SakuraGeminiPlugin(Star):
             yield event.chain_result([Comp.At(qq=sender_id), Comp.Plain(" 未配置 AI 服务，请联系管理员")])
             return
 
+        beijing_tz = timezone(timedelta(hours=8))
+        now_str = datetime.now(beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
+        dynamic_system_prompt = f"当前北京时间：{now_str}\n\n{self.system_prompt}"
+
         messages = self.ctx_mgr.build_llm_messages(
             group_id=group_id,
             user_id=sender_id,
             current_content=question,
-            system_prompt=self.system_prompt,
+            system_prompt=dynamic_system_prompt,
         )
 
         try:
