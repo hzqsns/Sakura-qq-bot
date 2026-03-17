@@ -1,0 +1,206 @@
+{
+  "group_list_mode": {
+    "description": "群聊权限模式",
+    "type": "string",
+    "options": ["whitelist", "blacklist", "none"],
+    "default": "none",
+    "hint": "whitelist: 仅允许列表内群；blacklist: 拒绝列表内群；none: 不限制"
+  },
+  "group_list": {
+    "description": "群号列表",
+    "type": "list",
+    "items": { "type": "string" },
+    "default": [],
+    "hint": "仅在 whitelist/blacklist 下生效；留空等效于无限制"
+  },
+  "trigger_keywords": {
+    "description": "额外关键词触发词列表",
+    "type": "list",
+    "items": { "type": "string" },
+    "default": ["hyw", "何意味"],
+    "hint": "仅参与关键词监听，不会注册为命令"
+  },
+  "video_asr_enable": {
+    "description": "是否启用音频转写",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后将尝试调用 ASR 提供商（asr_provider_id 为空时使用当前会话 STT 提供商）"
+  },
+  "enable_url_detect": {
+    "description": "是否识别 URL 并输出网页简版摘要（2-8句）",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后仅按文本/图片解释"
+  },
+  "enable_keyword_zssm": {
+    "description": "是否启用 zssm 和额外关键词自动触发",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后仅响应 /zssm 指令；不再通过 zssm 关键词或额外关键词触发"
+  },
+  "enable_heyiwei": {
+    "description": "兼容旧版：是否启用 hyw / 何意味 关键词",
+    "type": "bool",
+    "default": true,
+    "invisible": true,
+    "hint": "旧配置迁移兼容字段，新版本请改用 trigger_keywords"
+  },
+  "enable_empty_zssm_prompt": {
+    "description": "空输入时是否提示",
+    "type": "bool",
+    "default": false,
+    "hint": "当用户仅发送 zssm 或额外关键词，且未回复任何有关内容，是否回复提示语。"
+  },
+  "cf_screenshot_enable": {
+    "description": "Cloudflare 截图降级",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后在 HTML 被 CF 拦截时改用 urlscan 截图"
+  },
+  "keep_original_persona": {
+    "description": "是否保持原始人格设定参与回复",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后会在系统提示词中附加“保持原始人格设定回复”，尽量保持会话原有人设与说话风格"
+  },
+  "video_frame_interval_sec": {
+    "description": "抽帧间隔（秒）",
+    "type": "int",
+    "default": 6,
+    "hint": "每隔 N 秒取 1 帧"
+  },
+  "video_max_duration_sec": {
+    "description": "最大允许视频时长（秒）",
+    "type": "int",
+    "default": 120,
+    "hint": "超过则拒绝并提示"
+  },
+  "video_max_size_mb": {
+    "description": "最大允许视频大小（MB）",
+    "type": "int",
+    "default": 50,
+    "hint": "超过则拒绝并提示"
+  },
+  "forward_video_keyframe_enable": {
+    "description": "合并转发：视频关键帧参与聊天记录解释",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，若合并转发聊天记录中包含视频，将尝试抽取少量关键帧作为图片输入参与同一次解释；失败则回退为仅标记[视频]"
+  },
+  "forward_video_max_count": {
+    "description": "合并转发：最多处理的视频数量",
+    "type": "int",
+    "default": 2,
+    "hint": "仅对合并转发聊天记录生效；每个视频默认仅抽 1 张关键帧，避免图片过多导致模型调用失败"
+  },
+  "ffmpeg_path": {
+    "description": "ffmpeg 可执行文件路径",
+    "type": "string",
+    "default": "ffmpeg",
+    "hint": "可填写绝对路径；若为空将自动查找或尝试 imageio-ffmpeg"
+  },
+  "url_timeout_sec": {
+    "description": "抓取网页超时时间（秒）",
+    "type": "int",
+    "default": 20,
+    "hint": "范围建议 2-60"
+  },
+  "url_max_chars": {
+    "description": "参与摘要的正文片段最大长度（字符）",
+    "type": "int",
+    "default": 6000,
+    "hint": "限制输入规模，避免过长上下文"
+  },
+  "llm_timeout_sec": {
+    "description": "LLM 调用超时（秒）",
+    "type": "int",
+    "default": 90,
+    "hint": "用于防止模型调用卡死导致无回复；范围建议 5-600"
+  },
+  "cf_screenshot_size": {
+    "description": "Cloudflare 截图尺寸（宽x高，px）",
+    "type": "string",
+    "default": "1280x720",
+    "hint": "格式示例：1280x720，对应 width 和 height；建议宽 320-2000、高 240-4096"
+  },
+  "file_preview_max_size_kb": {
+    "description": "群文件内容预览允许的最大文件大小（KB）",
+    "type": "int",
+    "default": 100,
+    "hint": "超过该大小的群文件仅展示文件名和说明，不尝试读取内容片段"
+  },
+  "file_preview_exts": {
+    "description": "群文件内容预览的文本扩展名（逗号分隔，不含点）",
+    "type": "string",
+    "default": "txt,md,log,json,csv,ini,cfg,yml,yaml,py",
+    "hint": "仅对这些后缀的群文件尝试读取部分内容并交给 LLM 解释，可在此处自定义列表"
+  },
+  "text_provider_id": {
+    "description": "文本解释优先使用的 Provider ID",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "留空则使用当前会话 Provider"
+  },
+  "image_provider_id": {
+    "description": "图片转述优先使用的 Provider ID",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "留空则自动选择具备图片能力的 Provider"
+  },
+  "video_provider_id": {
+    "description": "视频解释优先使用的 Provider ID",
+    "type": "string",
+    "_special": "select_provider",
+    "hint": "仅用于视频解释，不影响图片转述"
+  },
+  "asr_provider_id": {
+    "description": "ASR 提供商 ID",
+    "type": "string",
+    "_special": "select_provider_stt",
+    "hint": "留空则使用当前会话 STT 提供商"
+  },
+  "video_direct_mode": {
+    "description": "视频直接输入模式",
+    "type": "string",
+    "options": ["off", "base64", "dashscope"],
+    "default": "off",
+    "hint": "off: 禁用直传，始终抽帧；base64: Base64编码(≤10MB，适用于第三方中转)；dashscope: 百炼模式(≤100MB本地路径，>100MB自动上传OSS)"
+  },
+  "video_direct_fps": {
+    "description": "视频直传抽帧频率",
+    "type": "int",
+    "default": 2,
+    "hint": "范围 1-30，传递给 API 的 fps 参数（仅 dashscope 模式生效）"
+  },
+  "video_direct_target_size_mb": {
+    "description": "视频压缩目标大小（MB）",
+    "type": "int",
+    "default": -1,
+    "hint": "-1: 按模式自动(base64→10MB, dashscope→100MB)；0: 不压缩；正整数: 手动指定目标大小"
+  },
+  "video_direct_timeout_sec": {
+    "description": "视频直传超时时间（秒）",
+    "type": "int",
+    "default": 300,
+    "hint": "范围 60-600，适用于大文件上传场景"
+  },
+  "bilibili_cookie": {
+    "description": "B站 Cookie（用于绕过 API 风控）",
+    "type": "object",
+    "hint": "选填。部分 B 站内容（图文动态等）需要登录态，请在浏览器登录 B 站后按 F12，在 Application > Cookies 中找到对应值填入",
+    "items": {
+      "SESSDATA": {
+        "description": "SESSDATA",
+        "type": "string",
+        "default": "",
+        "hint": "登录凭证，必填项"
+      },
+      "bili_jct": {
+        "description": "bili_jct",
+        "type": "string",
+        "default": "",
+        "hint": "CSRF Token，部分接口需要"
+      }
+    }
+  }
+}

@@ -1,0 +1,122 @@
+<div align="center">
+
+![:name](https://count.getloli.com/@:astrbot_zssm_explain?name=%3Aastrbot_zssm_explain&theme=miku&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
+
+## zssm_explain 插件说明
+
+一个为 AstrBot 提供「知识说明 / 消息解释」能力的插件。支持文本、图片、网页、视频以及 QQ 群文件（含 PDF，支持转 Markdown），可智能理解被回复的消息或内容链接，并输出结构化的中文解释。
+
+</div>
+
+---
+
+## 功能概览
+
+- 文本解释  
+  - 关键词 `zssm` 与配置中的额外关键词（默认 `hyw/何意味`）触发，对携带的文本进行简洁说明。  
+  - 支持「zssm + 文本」直接解释当前消息文本，无需回复。
+
+- 图片 / 图文消息解释  
+  - 支持发送消息的时候附带图片进行解释
+  - 支持回复一条包含图片的消息后发送 `zssm`，自动提取上下文文本和图片 URL，调用具备图片能力的多模态模型进行转述。  
+  - 支持 Napcat/OneBot 仅提供 `message_id` 的场景，通过 `get_msg` 回溯原消息。
+
+- 网页摘要（含 Cloudflare 降级）  
+  - 若消息中包含 URL（或直接发送 `zssm https://...`），自动抓取网页 HTML，提取标题、描述与正文片段，生成 2–8 句的简版摘要。  
+  - 若检测到 Cloudflare 防护：  
+    - 可自动调用 `urlscan` 截图接口，轮询截图就绪后下载图片，再交给多模态模型解释截图内容。  
+    - 截图获取失败或未启用降级时，会提示用户手动提供截图/摘录。
+
+- QQ 视频解释  
+  - 自动识别消息链中的视频组件，或 Napcat 文件消息中看起来是视频的文件。  
+  - 使用 `ffmpeg` 抽取多张关键帧，必要时调用 AstrBot 配置的 STT（ASR）对音频转写，将「关键帧 + 文本摘要」交给 LLM，总结整段视频。  
+  - 支持从 QQ 合并转发（`forward` / `nodes`）结构中解析视频；在聊天记录解释时默认抽取少量关键帧参与同一次解释（可通过配置关闭/限量）。
+
+- QQ 群文件解释（含 PDF→Markdown）  
+  - 回复 QQ 群文件消息后发送 `zssm`：  
+    - 对文本类扩展名（默认 `txt,md,log,json,csv,ini,cfg,yml,yaml,py` 等）读取前若干 KB 内容作为预览，连同文件名/说明一起交给 LLM 解释。  
+    - 对 PDF 文件：  
+      - 使用 PyMuPDF（`fitz`）优先将 PDF 内容转换为 Markdown（`page.get_text("markdown")`），保留标题、列表等基本格式；  
+      - 若 PyMuPDF 不可用，则回退到 PyPDF2 提取纯文本，并做段落归一化；  
+      - 根据配置的最大大小限制，仅在文本长度合理时追加到解释上下文中。  
+  - 支持 Napcat 的 QQ 合并转发聊天记录中嵌套的群文件：  
+    - 通过 `get_forward_msg` 拉取转发节点，在节点内容中查找首个群文件并进行同样的预览与解释。
+
+- QQ 合并转发聊天记录解释  
+  - 对于 QQ 合并转发（`forward` / `Node` / `Nodes` / `get_forward_msg`）：  
+    - 先展开所有节点，汇总文本与图片，作为「整段聊天记录」来解释。  
+    - 若记录中包含网址：  
+      - 非合并转发：优先按「网页摘要」处理；  
+      - 合并转发：以聊天记录解释为主，附加一段网页关键信息，请 LLM 同时考虑对话和链接内容。
+
+- 多模型 / 多模态支持  
+  - 文本解释可指定专用 Provider；  
+  - 图片/视频解释优先使用支持图片输入的 Provider；  
+  - ASR（音频转写）可指定 STT Provider；  
+  - 所有调用在失败时均带有回退逻辑（例如回退到当前会话 Provider，或仅做文本解释）。
+
+---
+
+## 触发方式
+
+### 指令触发
+
+- `/zssm`  
+  - 最基本用法：`/zssm` + 回复消息，解释被回复的文本/图片/群文件/视频/合并转发等。  
+  - 或 `/zssm 这段命令是干什么的？`，直接解释当前消息中的文本。
+  - 或 `/zssm [图片]`，直接解释当前消息中图片的含义。
+  - 当前只有 `/zssm` 会注册为指令；`trigger_keywords` 中的额外关键词不会注册为 `/命令`。
+
+### 关键词触发
+
+- 文本中命中关键词监听列表时自动触发。固定包含 `zssm`，额外关键词默认是 `hyw` / `何意味`，可在配置项 `trigger_keywords` 中调整：  
+  - `zssm 这条报错什么意思`  
+  - `@Bot zssm 请解释上面这段话`  
+  - `hyw 这段对话是什么意思`
+  - 若以 `/zssm` 开头则优先视为指令，不会重复触发关键词逻辑。
+- 该行为可通过配置项 `enable_keyword_zssm` 关闭；关闭后仅保留 `/zssm` 指令，不再响应 `zssm` 关键词和额外关键词。
+- 对于更容易误触发的 `hyw / 何意味`：  
+  - 若仅发送触发词本身，且没有回复任何消息，也没有附带文本/图片/链接，则默认不触发解释。  
+  - 如需在这类空输入时回提示语，可开启配置项 `enable_empty_zssm_prompt`。
+
+### 回复场景
+
+- 回复任意消息后发送 `zssm` / `/zssm`：  
+  - 若被回复中包含文本/图片，则优先解释文字和图片；  
+  - 若检测到视频或 Napcat 群文件，则启动视频解释或文件内容预览；  
+  - 若是 QQ 合并转发，则会自动抓取所有节点内容进行整段解释；  
+  - 若以上都无法获取有效内容，则默认不回复（`hyw / 何意味` 的空输入同样受配置 `enable_empty_zssm_prompt` 控制）。
+
+---
+
+## 依赖
+
+- `ffmpeg`：用于视频抽帧与音频裁剪。  
+
+---
+
+## 提示词与输出格式
+
+- 系统提示词与用户提示词模板集中在 `prompt_utils.py`：  
+  - `DEFAULT_SYSTEM_PROMPT`：约束 LLM 输出结构，如「关键词行 + 总结 + **详细阐述**」。  
+  - `DEFAULT_TEXT_USER_PROMPT` / `DEFAULT_IMAGE_USER_PROMPT`：分别用于纯文本、图文场景。  
+  - `DEFAULT_URL_USER_PROMPT` / `DEFAULT_VIDEO_USER_PROMPT`：用于网页摘要与视频解释。
+- 如需自定义输出格式（例如改为项目管理风格、问答风格），建议修改 `prompt_utils.py` 中的常量。
+
+---
+
+## 已知限制与 TODO
+
+- 目前对部分复杂网站（强 JS 渲染、登录态依赖）仍可能抓取失败，需要手动截图或粘贴正文。  
+- 对 PDF 中的表格、公式等结构，PyMuPDF 的 Markdown 输出虽有改善，但不保证 100% 还原。  
+- B 站等复杂视频页面的「直接链接解析」仍在完善中，当前推荐以“视频文件 / 小程序分享卡片 / 网页链接 + 截图”的方式进行解释。
+- cf爬虫api
+---
+
+## 特别感谢
+
+- [Reina](https://github.com/Ri-Nai) 本插件参考了他的json消息处理代码并完善了json卡片消息的处理
+- [氕氙](https://github.com/piexian) 感谢稀有气体同学的PR
+- [プリン](https://github.com/zouyonghe) 感谢热心群u的PR
+- [回归天空](https://github.com/SXP-Simon) 感谢回归天空同学的PR
+- [xunxiing](https://github.com/xunxiing) 感谢到此为止吧同学的PR
