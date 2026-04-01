@@ -12,8 +12,17 @@ data/napcat/qq/*
 data/summary_logs/*
 !data/summary_logs/.gitkeep
 
-# Third-party plugins (installed separately)
-plugins/astrbot_plugin_*/
+# Third-party plugins (installed separately) — ignore contents but allow specific patched files
+plugins/astrbot_plugin_bilivideo/*
+!plugins/astrbot_plugin_bilivideo/main.py
+plugins/astrbot_plugin_videos_analysis/*
+!plugins/astrbot_plugin_videos_analysis/main.py
+plugins/astrbot_plugin_chuanhuatong/
+plugins/astrbot_plugin_link_resolver/
+plugins/astrbot_plugin_music/
+plugins/astrbot_plugin_parser/
+plugins/astrbot_plugin_pokepro/
+plugins/astrbot_plugin_qq_group_daily_analysis/
 
 # Plugin runtime data and backups
 plugins/sakura-gemini/data/
