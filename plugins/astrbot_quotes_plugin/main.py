@@ -258,12 +258,12 @@ class QuotesPlugin(Star):
 
     # ============= 指令 =============
     # 指令入口
-    async def add_quote(self, event: AstrMessageEvent, uid: str = “”):
-        “””添加语录（上传）。用法：先回复某人的消息，再发送”上传”（可附图）。”””
+    async def add_quote(self, event: AstrMessageEvent, uid: str = ""):
+        """添加语录（上传）。用法：先回复某人的消息，再发送"上传"（可附图）。"""
         # 1) 解析被回复消息 ID（必须）
         reply_msg_id = self._get_reply_message_id(event)
         if not reply_msg_id:
-            yield event.plain_result(“请先回复一条消息，再发送「上传」来保存语录哦~”)
+            yield event.plain_result("请先回复一条消息，再发送「上传」来保存语录哦~")
             return
 
         # 2) 拉取被回复消息内容与发送者
@@ -298,7 +298,7 @@ class QuotesPlugin(Star):
         # 统一剔除 @提及（例如：@昵称(123456789)、@昵称、@全体成员）
         target_text = self._strip_at_tokens(target_text or "") or ""
 
-        # 文本缺失时允许“纯图片语录”
+        # 文本缺失时允许"纯图片语录"
         if not target_text and not images:
             yield event.plain_result("未获取到被回复消息内容或图片，请确认已正确回复对方的消息或附带图片。")
             return
@@ -306,7 +306,7 @@ class QuotesPlugin(Star):
             target_text = "[图片]"
 
         # 名称/QQ 归属规则：
-        # - 如果本条消息“自己上传了图片”（images_from_current 非空）：
+        # - 如果本条消息"自己上传了图片"（images_from_current 非空）：
         #     · 若@了某人，则语录归属该@用户。
         #     · 否则，语录归属为上传者本人（event.get_sender_id()）。
         # - 否则（未上传图片，仅回复他人）：
@@ -325,12 +325,12 @@ class QuotesPlugin(Star):
         else:
             target_qq = str(target_qq or "")
 
-        # 黑名单拦截：被标记为黑名单的 QQ 不再收录语录（包括“上传 QQ号/@” 场景）
+        # 黑名单拦截：被标记为黑名单的 QQ 不再收录语录（包括"上传 QQ号/@" 场景）
         if target_qq and self._is_blacklisted(target_qq):
             yield event.plain_result("该用户在语录黑名单中，本次语录已忽略。")
             return
 
-        # 最终以归属 QQ 为准统一解析展示名，避免“名不对号”
+        # 最终以归属 QQ 为准统一解析展示名，避免"名不对号"
         target_name = await self._resolve_user_name(event, target_qq) if target_qq else ""
         if not target_name:
             target_name = target_qq or "未知用户"
@@ -432,7 +432,7 @@ class QuotesPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def random_quote_on_poke(self, event: AstrMessageEvent):
-        """当收到“对 Bot 本身的戳一戳”消息段时，按配置随机发送一条语录。"""
+        """当收到"对 Bot 本身的戳一戳"消息段时，按配置随机发送一条语录。"""
         # 开关关闭则完全不处理戳一戳
         if not self._cfg_poke_enabled:
             return
@@ -442,7 +442,7 @@ class QuotesPlugin(Star):
         if not self._is_poke_allowed_in_group(group_id):
             return
 
-        # 仅响应“戳 Bot 本身”的 Poke 段
+        # 仅响应"戳 Bot 本身"的 Poke 段
         self_id = self._get_self_id(event)
         if not self_id:
             return
@@ -475,7 +475,7 @@ class QuotesPlugin(Star):
             if secrets.randbelow(100) >= prob:
                 return
 
-        # 复用现有随机语录逻辑；当没有语录时静默返回（不发送“本群没有语录”类提示）
+        # 复用现有随机语录逻辑；当没有语录时静默返回（不发送"本群没有语录"类提示）
         async for res in self.random_quote(event, uid="", _silent_if_empty=True):
             yield res
 
@@ -487,7 +487,7 @@ class QuotesPlugin(Star):
 
     @filter.command("删除", alias={"删除语录"})
     async def delete_quote(self, event: AstrMessageEvent):
-        """删除语录：请『回复机器人发送的语录』并发送“删除”来删除该语录。"""
+        """删除语录：请『回复机器人发送的语录』并发送"删除"来删除该语录。"""
         # 权限检查：根据配置的 delete_permission 进行动态校验
         if not await self._check_delete_permission(event):
             yield event.plain_result("权限不足：你无权使用删除语录指令。")
@@ -542,10 +542,10 @@ class QuotesPlugin(Star):
         """显示语录相关指令的使用说明。"""
         help_text = (
             "语录插件帮助\n"
-            “- 上传：先回复某人的消息，再发送”上传”或”@某人 上传”（可附带图片）保存为语录。无需指令前缀，@某人可指定语录归属。\n”
-            "- 语录：随机发送一条语录；可用“语录 @某人”或“指令前缀+语录 12345678”仅随机该用户的语录；若含用户上传图片，将直接发送原图。\n"
-            "- 删除：回复机器人刚发送的随机语录消息，发送“删除”或“删除语录”进行删除。\n"
-            "- 设置：可在插件设置开启“全局模式”以跨群共享语录；关闭则各群/私聊互相隔离。"
+            "- 上传：先回复某人的消息，再发送「上传」或「@某人 上传」（可附带图片）保存为语录。无需指令前缀，@某人可指定语录归属。\n"
+            "- 语录：随机发送一条语录；可用「语录 @某人」或「指令前缀+语录 12345678」仅随机该用户的语录；若含用户上传图片，将直接发送原图。\n"
+            "- 删除：回复机器人刚发送的随机语录消息，发送「删除」或「删除语录」进行删除。\n"
+            "- 设置：可在插件设置开启「全局模式」以跨群共享语录；关闭则各群/私聊互相隔离。"
         )
         yield event.plain_result(help_text)
 
